@@ -1,42 +1,39 @@
 #if 0
+#!/bin/sh
 #
 # Plan 9 like libc.h
 #
 
 set -xe
 
-VERSION=1.0
-SRC=main.c
-BIN=main
+SRC=
+BIN=
 
-if [ "$1" = clean ]; then
-	for i in $SRC; do
-		rm -f "${i%.c}.o"
-	done
-	rm -f "$BIN"
-	exit
-fi
-
-CPPFLAGS="-D_DEFAULT_SOURCE -DVERSION=\"$VERSION\""
+CPPFLAGS="-D_DEFAULT_SOURCE"
 CFLAGS="-ggdb -ansi -pedantic -Wextra -Wall $CPPFLAGS"
 LDFLAGS=
 CC=cc
 
-for i in $SRC; do
-	out=${i%.c}.o
+if [ "$1" = clean ]; then
+	for f in $SRC; do
+		rm -f "${f%.c}.o"
+	done
+	rm -f "$BIN"
+	[ $# -eq 0 ] && exit 0
+fi
+
+for f in $SRC; do
+	out=${f%.c}.o
 	OBJ="$OBJ $out"
-	$CC -c $CFLAGS $i -o $out
+	if [ ! -e "$out" ] || [ "$(find -L "$f" -prune -newer "$out")" ]; then
+		$CC -c $CFLAGS $f -o "$out"
+	fi
 done
 
-$CC $LDFLAGS $OBJ -o "$BIN"
+[ "$OBJ" ] && $CC $LDFLAGS $OBJ -o "$BIN"
 
-exit
+exit 0
 #endif
-#ifndef LIBC_H__
-#ifdef INCLUDE_GUARD
-#define LIBC_H__
-#endif
-
 #include <assert.h>
 #include <errno.h>
 #include <math.h>
@@ -48,11 +45,25 @@ exit
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef MEMCHECK_MUTEX
+#define MEMCHECK
+#include <pthread.h>
+#endif
 
 typedef unsigned char  uchar;
 typedef unsigned short ushort;
 typedef unsigned int   uint;
 typedef unsigned long  ulong;
+
+#define MAX(x, y)         ((x) > (y) ? (x) : (y))
+#define MIN(x, y)         ((x) < (y) ? (x) : (y))
+#define BETWEEN(x, a, b)  ((a) <= (x) && (x) <= (b))
+#define IMPLIES(x, y)     (!(x) || (y))
+#define COMPARE(x, y)     (((x) > (y)) - ((x) < (y)))
+#define SIGN(x)           COMPARE(x, 0)
+#define SIZE(X)           (sizeof X / sizeof X[0]
+#define SWAP(x, y, T)     do { T tmp = (x); (x) = (y); (y) = tmp; } while (0)
+#define ENTRY_OF(p, t, m) (t *)((char *)(p) - offsetof(t, m))
 
 extern void die(const char *fmt, ...);
 extern void *emalloc(size_t size);
@@ -71,7 +82,8 @@ extern void memdump(void);
 #define memdump()
 #endif
 
-#ifdef IMPLEMENTATION
+#ifdef LIBC_IMPLEMENTATION
+#undef LIBC_IMPLEMENTATION
 
 void
 die(const char *fmt, ...)
@@ -81,7 +93,7 @@ die(const char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
-	if(fmt[0] && fmt[strlen(fmt) - 1] == ':') {
+	if (fmt[0] && fmt[strlen(fmt) - 1] == ':') {
 		fputc(' ', stderr);
 		perror(NULL);
 	} else fputc('\n', stderr);
@@ -93,7 +105,7 @@ emalloc(size_t size)
 {
 	void *p;
 
-	if(!(p = malloc(size))) die("malloc:");
+	if (!(p = malloc(size))) die("malloc:");
 	return p;
 }
 
@@ -102,7 +114,7 @@ erealloc(void *ptr, size_t size)
 {
 	void *p;
 
-	if(!(p = realloc(ptr, size))) die("realloc:");
+	if (!(p = realloc(ptr, size))) die("realloc:");
 	return p;
 }
 
@@ -111,28 +123,26 @@ ecalloc(size_t nmemb, size_t size)
 {
 	void *p;
 
-	if(!(p = calloc(nmemb, size))) die("calloc:");
+	if (!(p = calloc(nmemb, size))) die("calloc:");
 	return p;
 }
 
 char *
 estrdup(const char *str)
 {
-	if(!(str = strdup(str))) die("strdup:");
+	if (!(str = strdup(str))) die("strdup:");
 	return (char *)str;
 }
 
-#define malloc  emalloc
-#define calloc  ecalloc
-#define realloc erealloc
-#define strdup  estrdup
-
 #ifdef  MEMCHECK
 
-#undef malloc
-#undef calloc
-#undef realloc
-#undef strdup
+#ifdef MEMCHECK_MUTEX
+#define MEMCHECK_MUTEX_LOCK()   pthread_mutex_lock(&alloc_mutex)
+#define MEMCHECK_MUTEX_UNLOCK() pthread_mutex_unlock(&alloc_mutex)
+#else
+#define MEMCHECK_MUTEX_LOCK()
+#define MEMCHECK_MUTEX_UNLOCK()
+#endif
 
 #ifndef MEMCHECK_PIPE
 #define MEMCHECK_PIPE stdout
@@ -146,6 +156,9 @@ typedef struct alloc_info {
 } alloc_info;
 
 static alloc_info *alloc_head;
+#ifdef MEMCHECK_MUTEX
+static pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 void *
 mcmalloc(size_t size, const char *file, int line)
@@ -154,21 +167,19 @@ mcmalloc(size_t size, const char *file, int line)
 
 	alloc = malloc(size + sizeof *alloc_head);
 	if (!alloc) {
-#ifdef MEMCHECK_RETURN
-		return alloc;
-#else
 		fprintf(stderr, "malloc: %s\n", strerror(errno));
 		memdump();
 		exit(1);
-#endif
 	}
 	alloc->file = file;
 	alloc->line = line;
 	alloc->size = size;
+	MEMCHECK_MUTEX_LOCK();
 	alloc->next = alloc_head;
 	alloc->prev = NULL;
 	if (alloc_head) alloc->next->prev = alloc;
 	alloc_head = alloc;
+	MEMCHECK_MUTEX_UNLOCK();
 	return alloc + 1;
 }
 
@@ -190,9 +201,6 @@ mcrealloc(void *ptr, size_t size, const char *file, int line)
 	new = mcmalloc(size, alloc->file, alloc->line);
 #else
 	new = mcmalloc(size, file, line);
-#endif
-#ifndef MEMCHECK_RETURN
-	if (!new) return new;
 #endif
 	memcpy(new, ptr, alloc->size);
 	mcfree(ptr);
@@ -228,10 +236,12 @@ mcfree(void *ptr)
 	alloc = (alloc_info *)ptr - 1;
 	alloc->size = ~alloc->size;
 #ifndef MEMCHECK_SHOWALL
+	MEMCHECK_MUTEX_LOCK();
 	if (alloc->prev == NULL) {
 		assert(alloc_head == alloc);
 		alloc_head = alloc->next;
 	} else alloc->prev->next = alloc->next;
+	MEMCHECK_MUTEX_UNLOCK();
 	if (alloc->next) alloc->next->prev = alloc->prev;
 	free(alloc);
 #endif
@@ -257,14 +267,21 @@ memdump(void)
 	}
 }
 
+#endif /* MEMCHECK */
+#endif /* LIBC_IMPLEMENTATION */
+
+#ifdef MEMCHECK
 #define malloc(size)         mcmalloc(size,        __FILE__, __LINE__)
 #define calloc(nmemb, size)  mccalloc(nmemb, size, __FILE__, __LINE__)
 #define realloc(ptr, size)   mcrealloc(ptr, size,  __FILE__, __LINE__)
 #define strdup(str)          mcstrdup(str,         __FILE__, __LINE__)
 #define free(ptr)            mcfree(ptr)
-
-#endif /* MEMCHECK */
-#endif /* IMPLEMENTATION */
+#else
+#define malloc  emalloc
+#define calloc  ecalloc
+#define realloc erealloc
+#define strdup  estrdup
+#endif
 
 extern char *argv0;
 
@@ -311,5 +328,3 @@ extern char *argv0;
 
 
 #define ARGEND }}
-
-#endif /* LIBC_H__ */
