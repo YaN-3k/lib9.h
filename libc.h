@@ -1,10 +1,15 @@
 #if 0
-#!/bin/sh
+# This header provides few basics typedefs, macros and utilities.
+# It needs to be included once in your source file with defined
+# LIBC_IMPLEMENTATION to compile the function definitions.
+# It can even build your project if you are to lazy to setup make.
+# Set the SRC and BIN variables and then:
+# $ chmod +x libc.h && ./libc.h
 
 set -xe
 
-SRC=main.c
-BIN=main
+SRC=
+BIN=
 
 CPPFLAGS="-D_DEFAULT_SOURCE"
 CFLAGS="-ggdb -pedantic -Wextra -Wall $CPPFLAGS"
@@ -33,6 +38,7 @@ exit 0
 #endif
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -42,24 +48,28 @@ exit 0
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <limits.h>
 #ifdef MEMCHECK_MUTEX
 #define MEMCHECK
 #include <pthread.h>
 #endif
 
-typedef unsigned char  uchar;
-typedef unsigned short ushort;
-typedef unsigned int   uint;
-typedef unsigned long  ulong;
+typedef unsigned char      uchar;
+typedef signed char        schar;
+typedef unsigned short     ushort;
+typedef unsigned int       uint;
+typedef unsigned long      ulong;
+typedef	long long          vlong;
+typedef	unsigned long long uvlong;
 
 #define MAX(x, y)         ((x) > (y) ? (x) : (y))
 #define MIN(x, y)         ((x) < (y) ? (x) : (y))
 #define LIMIT(a, x, b)    MAX(MIN(x, b), x, a)
-#define SIZE(x)           (sizeof x / sizeof *x)
+#define SIZE(x)           (sizeof(x) / sizeof(*x))
 #define ENTRY_OF(p, t, m) (t *)((char *)(p) - offsetof(t, m))
 #define MAX_ALIGN         0x10
 #define ALIGN(x, align)   (((x) + (align) - 1) & ~((align) - 1))
+#define SET(x)            (x) = 0
+#define USED(x)           (void)(x)
 
 char *argv0;
 
@@ -119,15 +129,6 @@ char *argv0;
 
 #define ARGEND }}
 
-extern void eprintf(const char *fmt, ...);
-extern void enprintf(int status, const char *fmt, ...);
-extern void weprintf(const char *fmt, ...);
-extern long long estrtonum(const char *numstr, long long minval, long long maxval);
-extern void *emalloc(size_t size);
-extern void *erealloc(void *ptr, size_t size);
-extern void *ecalloc(size_t nmemb, size_t size);
-extern char *estrdup(const char *s);
-
 #ifdef MEMCHECK
 extern void *mcmalloc(size_t size, const char *file, int line);
 extern void *mcrealloc(void *ptr, size_t size, const char *file, int line);
@@ -136,6 +137,14 @@ extern char *mcstrdup(const char *s, const char *file, int line);
 extern void mcfree(void *ptr);
 extern void memdump(void);
 #else
+extern void eprintf(const char *fmt, ...);
+extern void enprintf(int status, const char *fmt, ...);
+extern void weprintf(const char *fmt, ...);
+extern long long estrtonum(const char *numstr, long long minval, long long maxval);
+extern void *emalloc(size_t size);
+extern void *erealloc(void *ptr, size_t size);
+extern void *ecalloc(size_t nmemb, size_t size);
+extern char *estrdup(const char *s);
 #define memdump()
 #endif
 
@@ -280,7 +289,7 @@ mcmalloc(size_t size, const char *file, int line)
 	alloc_info *alloc;
 	size_t alloc_align;
 
-	alloc_align = ALIGN(sizeof *alloc, MAX_ALIGN);
+	alloc_align = ALIGN(sizeof(*alloc), MAX_ALIGN);
 	alloc = malloc(size + alloc_align);
 	if (!alloc) {
 		fprintf(stderr, "malloc: %s\n", strerror(errno));
@@ -311,7 +320,7 @@ mcrealloc(void *ptr, size_t size, const char *file, int line)
 		return NULL;
 	}
 
-	alloc = (alloc_info *)((char *)ptr - ALIGN(sizeof *alloc, MAX_ALIGN));
+	alloc = (alloc_info *)((char *)ptr - ALIGN(sizeof(*alloc), MAX_ALIGN));
 	if (size <= alloc->size) return ptr;
 #ifdef MEMCHECK_PRESERVE_FILELINE
 	new = mcmalloc(size, alloc->file, alloc->line);
@@ -349,7 +358,7 @@ mcfree(void *ptr)
 	alloc_info *alloc;
 
 	if (ptr == NULL) return;
-	alloc = (alloc_info *)((char *)ptr - ALIGN(sizeof *alloc, MAX_ALIGN));
+	alloc = (alloc_info *)((char *)ptr - ALIGN(sizeof(*alloc), MAX_ALIGN));
 	alloc->size = ~alloc->size;
 #ifndef MEMCHECK_SHOWALL
 	MEMCHECK_MUTEX_LOCK();
@@ -391,5 +400,11 @@ memdump(void)
 #define ecalloc(nmemb, size)  mccalloc(nmemb, size, __FILE__, __LINE__)
 #define erealloc(ptr, size)   mcrealloc(ptr, size,  __FILE__, __LINE__)
 #define estrdup(str)          mcstrdup(str,         __FILE__, __LINE__)
-#define efree(ptr)            mcfree(ptr)
+#define free    mcfree
+#define malloc  emalloc
+#define calloc  ecalloc
+#define realloc erealloc
+#define strdup  estrdup
 #endif
+
+/* vim: set noet ts=8: */
