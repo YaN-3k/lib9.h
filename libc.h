@@ -1,19 +1,14 @@
 #if 0
-# This header provides few basics typedefs, macros and utilities.
-# It needs to be included once in your source file with defined
-# LIBC_IMPLEMENTATION to compile the function definitions.
-# It can even build your project if you are to lazy to setup make.
-# Set the SRC and BIN variables and then:
-# $ chmod +x libc.h && ./libc.h
+# Please don't ask me why this exists
 
 set -xe
 
-SRC=
-BIN=
+SRC=main.c
+BIN=main
 
 CPPFLAGS="-D_DEFAULT_SOURCE"
-CFLAGS="-ggdb -pedantic -Wextra -Wall $CPPFLAGS"
-LDFLAGS=
+CFLAGS="-std=c99 -ggdb -pedantic -Wextra -Wall $CPPFLAGS"
+LDFLAGS="-lm -pthread"
 CC=cc
 
 if [ "$1" = clean ]; then
@@ -41,17 +36,15 @@ exit 0
 #include <limits.h>
 #include <math.h>
 #include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#ifdef MEMCHECK_MUTEX
-#define MEMCHECK
 #include <pthread.h>
-#endif
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef unsigned char      uchar;
 typedef signed char        schar;
@@ -70,6 +63,14 @@ typedef	unsigned long long uvlong;
 #define ALIGN(x, align)   (((x) + (align) - 1) & ~((align) - 1))
 #define SET(x)            (x) = 0
 #define USED(x)           (void)(x)
+#define TRY(fn, ...)      if (fn(__VA_ARGS__)) eprintf(#fn ":")
+
+#ifdef NDEBUG
+#define TRACE(fmt, ...)
+#else
+#define TRACE(fmt, ...) \
+        printf("%s:%d " fmt "\n", __FILE__, __LINE__, __VA_ARGS__)
+#endif
 
 char *argv0;
 
@@ -129,6 +130,10 @@ char *argv0;
 
 #define ARGEND }}
 
+#ifdef MEMCHECK_MUTEX
+#define MEMCHECK
+#endif
+
 #ifdef MEMCHECK
 extern void *mcmalloc(size_t size, const char *file, int line);
 extern void *mcrealloc(void *ptr, size_t size, const char *file, int line);
@@ -148,10 +153,9 @@ extern char *estrdup(const char *s);
 #define memdump()
 #endif
 
-#ifdef LIBC_IMPLEMENTATION
-#undef LIBC_IMPLEMENTATION
+#ifdef LIBC_IMPL
 
-static void xvprintf(const char *fmt, va_list ap);
+static void xvprintf_(const char *fmt, va_list ap);
 
 void
 eprintf(const char *fmt, ...)
@@ -159,7 +163,7 @@ eprintf(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	xvprintf(fmt, ap);
+	xvprintf_(fmt, ap);
 	va_end(ap);
 
 	exit(1);
@@ -171,7 +175,7 @@ enprintf(int status, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	xvprintf(fmt, ap);
+	xvprintf_(fmt, ap);
 	va_end(ap);
 
 	exit(status);
@@ -183,12 +187,12 @@ weprintf(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	xvprintf(fmt, ap);
+	xvprintf_(fmt, ap);
 	va_end(ap);
 }
 
 void
-xvprintf(const char *fmt, va_list ap)
+xvprintf_(const char *fmt, va_list ap)
 {
 	if (argv0 && strncmp(fmt, "usage", strlen("usage")))
 		fprintf(stderr, "%s: ", argv0);
