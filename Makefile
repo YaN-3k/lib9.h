@@ -1,9 +1,9 @@
 CPPFLAGS = -D_DEFAULT_SOURCE
 CFLAGS   = -ggdb -std=c99 -pedantic -Wextra -Wall ${CPPFLAGS} 
-LDFLAGS  = -lpthread
+LDFLAGS  = -lm -lpthread
 
-BIN = main
-SRC = main.c
+BIN = prog
+SRC = prog.c
 OBJ = ${SRC:.c=.o}
 
 all: options ${BIN}
